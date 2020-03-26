@@ -5,10 +5,11 @@
 !byte $0c,$08,$0a,$00,$9e,$20,$34,$30,$39,$36,$00,$00,$00
 ; Executes "SYS 4096" in BASIC
 ;
-
 ;========================================================
 
 *=$1000
+
+!source "macros.asm"
 
 SCREEN = $0400
 KEYBOARD = $00CB
@@ -543,9 +544,302 @@ playing
 	jsr init_level
 	
 	jsr draw_target_puzzle
--	jsr draw_player_puzzle
+-	
+	jsr vsync
+	jsr .handle_input
+	jsr draw_player_puzzle
+	
 	jmp-
 	
+;-----------------------------------
+
+.handle_input
+
+	lda JOY2       ; Joystick 2 state
+	
+	cmp .joy2_pstate ; Is the input new?
+	bne+
+	rts		; return if it isn't
+	
++	sta .joy2_pstate
+	
+	; check JOY2_UP
+	
+	lda JOY2
+	
+	and #JOY_UP ; Up is pressed
+	cmp #0
+	bne+
+	jsr move_cursor_up
+	+
+	
+	; check JOY2_DOWN
+	
+	lda JOY2
+	
+	and #JOY_DOWN ; is down pressed
+	cmp #0
+	bne+ ; if not, jump to +
+	jsr move_cursor_down
+	+
+	
+	; check JOY2_LEFT
+	
+	lda JOY2
+	
+	and #JOY_LEFT ; is left pressed
+	cmp #0
+	bne+ ; if not, jump to +
+	jsr move_cursor_left
+	+
+	
+	; check JOY2_RIGHT
+	
+	lda JOY2
+	
+	and #JOY_RIGHT ; is right pressed?
+	cmp #0
+	bne+ ; if not, jump to +
+	jsr move_cursor_right
+	+
+
+	rts
+
+.joy2_pstate !byte #0 	; The previous state of Joystick #2
+			; This is used to determine whether
+			; the input is new
+
+!zone move_cursor_up
+move_cursor_up
+;======================================================================
+;
+; move_cursor_up
+;
+;======================================================================
+;
+; moves the cursor up if possible
+; TODO add flash on invalid move?
+;
+
+	pha	; backup accumulator
+
+	lda cursor_sprite_pos	; load cursor position
+	clc	; clear carry
+	cmp #6  ; compare position with 6
+	
+	bcc+	; is position < 6? the skip to +
+	sec	; set carry
+	sbc #6	; position = position - 6
+	sta cursor_sprite_pos	; save position
+	+
+	
+	pla	; restore accumulator
+	
+	jsr update_cursor ; update the cursor sprite
+	
+	rts	; return to sender
+
+!zone move_cursor_down
+move_cursor_down
+;======================================================================
+;
+; move_cursor_down
+;
+;======================================================================
+;
+; moves the cursor down if possible
+; TODO add flash on invalid move?
+;
+
+	pha	; backup accumulator
+
+	lda cursor_sprite_pos	; load cursor position
+	clc	; clear carry
+	cmp #31 ; compare position with 30
+	
+	bcs+	; is position >= 30? the skip to +
+	clc	; clear carry
+	adc #6	; position = position + 6
+	sta cursor_sprite_pos	; save position
+	+
+	
+	pla	; restore accumulator
+	
+	jsr update_cursor ; update the cursor sprite
+
+	rts	; return to sender
+
+!zone move_cursor_left
+move_cursor_left
+;======================================================================
+;
+; move_cursor_left
+;
+;======================================================================
+;
+; moves the cursor left if possible
+; TODO add flash on invalid move?
+;
+
+	pha	; backup accumulator
+
+	lda cursor_sprite_pos	; load cursor position
+	
+	; first we calculate position % 6
+-
+	clc	; clear carry
+	cmp #6	; compare acc to 6
+	bcc+	; if acc < 6, branch to +
+
+	sec	; set carry
+	sbc #6	; acc = acc - 6
+	jmp-	; next
++
+	
+	clc	; clear carry
+	cmp #0  ; compare position with 0
+	
+	beq+	; is position == 0? the skip to +
+	dec cursor_sprite_pos	; position = position - 1
+	+
+	
+	pla	; restore accumulator
+
+	jsr update_cursor ; update the cursor sprite
+	
+	rts	; return to sender
+
+!zone move_cursor_right
+move_cursor_right
+;======================================================================
+;
+; move_cursor_right
+;
+;======================================================================
+;
+; moves the cursor right if possible
+; TODO add flash on invalid move?
+;
+
+	pha	; backup accumulator
+
+	lda cursor_sprite_pos	; load cursor position
+	
+	; first we calculate position % 6
+-
+	clc	; clear carry
+	cmp #6	; compare acc to 6
+	bcc+	; if acc < 6, branch to +
+
+	sec	; set carry
+	sbc #6	; acc = acc - 6
+	jmp-	; next
++
+	
+	clc	; clear carry
+	cmp #5  ; compare position with 5
+	
+	beq+	; position == 5? the skip to +
+	inc cursor_sprite_pos	; position = position + 1
+	+
+	
+	pla	; restore accumulator
+	
+	jsr update_cursor ; update the cursor sprite
+
+	rts	; return to sender
+
+
+!zone update_cursor
+update_cursor
+;======================================================================
+;
+; update_cursor
+;
+;======================================================================
+;
+; sets the cursor sprite x and y based on the cursor position
+;
+
+	+backup_registers
+	
+	; setting the cursor x and y to 0 first
+	
+	clc
+	lda #0
+	sta cursor_sprite_x
+	sta cursor_sprite_y
+	
+	; now updating them it using the cursor_position
+	
+	lda cursor_sprite_pos
+	
+.rows
+	clc		; clear carry
+	cmp #6		; position < 6 ?
+	bcc .columns	; then go to .columns
+	
+	sec		; set carry
+	sbc #6		; position = position - 6
+	
+	tax		; transfer acc to x (buffer)
+	lda cursor_sprite_y ; load y coordinate
+	clc		; clear carry
+	adc #16		; y coordinate = y co-ordinate + 16 (two petscii chars)
+	sta cursor_sprite_y ; save y co-ordinate
+	txa		; transfer x (buffer) to acc
+	
+	jmp .rows	; next row
+	
+.columns
+
+	clc		; clear carry
+	cmp #0		; acc == 0?
+	beq .end	; if so, go to .end
+	
+	sec		; set carry
+	sbc #1		; x = x - 1
+	
+	tax			; transfer acc to x ( buffer )
+	lda cursor_sprite_x	; load x co-ordinate
+	clc			; clear carry
+	adc #16			; x co-ordinate = x co-ordinate + 16
+	sta cursor_sprite_x	; save x co-ordinate
+	txa			; transfer x ( buffer ) to acc
+	
+	jmp .columns	; next column
+
+.end	
+	; adding the offsets
+	
+	clc			; clear carry
+	lda cursor_sprite_y	; load ypos
+	adc #.cursor_y_offset	; ypos = ypos + offset
+	sta cursor_sprite_y	; save ypos
+	
+	clc			; clear carry
+	lda cursor_sprite_x	; load xpos
+	adc #.cursor_x_offset	; xpos = xpos + offset
+	sta cursor_sprite_x	; save xpos
+	
+	bcc+		; if xpos+offset<=255, jump to +
+	lda #1		; acc = 1 (flag bit for sprite 0 x pos)
+	ora cursor_sprite_xmsb
+	jmp++		; jump to ++
+	+
+	lda cursor_sprite_xmsb	; load current flags bits
+	and #%11111110		; turning flag for sprite 0 x pos to 0
+	++
+	
+	sta cursor_sprite_xmsb ; save xsmb flags
+	
+	+restore_registers
+
+	rts
+
+.cursor_x_offset = $d0 ; offset from the left of the screen
+.cursor_y_offset = $72 ; offset from the top of the screen
+
 !zone init_level
 ;======================================================================
 ;
@@ -574,9 +868,141 @@ init_level
 	inx
 	jmp-
 +	
+
+	jsr init_cursor_sprite
 	
 	rts
+
+!zone init_cursor_sprite
+;======================================================================
+;
+; init_cursor_sprite
+;
+;======================================================================
+;
+; the cursor sprite is used to hide a piece, creating the "empty"
+; square that moves around
+;
+
+init_cursor_sprite
+
+	lda #1		; enabling sprite 0
+	sta VIC+21	;
 	
+	lda #32		; the pointer to the sprite data
+	sta $7f8	; 32 * 64 = $0800
+	
+	lda #100	; setting the x position
+	sta cursor_sprite_x
+	
+	lda #100	; and setting the y position
+	sta cursor_sprite_y
+	
+	lda #7		; setting the sprite colour
+	sta cursor_sprite_colour
+	
+	; now to copy the sprite over
+	
+	ldx #0
+	
+.loop
+	lda cursor_sprite,x	; copying the next byte
+	sta $800,x		; storing it
+	
+	inx			; x++
+	cpx #64			; x==64?
+	bne .loop		; true: go to .loop
+				; false: we're done
+				
+	jsr update_cursor ; update the cursor sprite
+
+	rts
+			
+!zone swap_tiles
+swap_tiles
+;======================================================================
+;
+; swap_tiles
+;
+;======================================================================
+;
+; swaps two tiles in the player's solution effort
+;
+; arg8b1 - index of first tile (tile a)
+; arg8b2 - index of second tile (tile b)
+;
+
+	lda #<player_solution	; setting up a zero page pointer
+	sta ZPP1		; because we use indexing
+	lda #>player_solution	;
+	sta ZPP1+1		;
+	
+	jsr calc_tile_offset	; calculating the offset for tile a
+	lda ret8b1
+	sta .tile_a_offset
+	
+	lda arg8b2		; calculating the offset for tile b
+	sta arg8b1
+	jsr calc_tile_offset
+	lda ret8b1
+	sta .tile_b_offset
+	
+.tile_a_offset !byte 0
+.tile_b_offset !byte 0
+.buffer_tiles !byte 0,0,0,0,0,0,0,0 ; to hold the characters and colours
+
+!zone calc_tile_offset
+calc_tile_offset
+;======================================================================
+;
+; calc_tile_offset
+;
+;======================================================================
+;
+; calculates the offset of the tile in memory
+;
+; args
+; 	arg8b1 - tile index
+;
+; returns
+; 	ret8b1 - calculated offset
+;
+
+	+backup_registers
+	
+	lda arg8b1 ; loading the tile index
+	ldx #0
+
+.loop:
+	clc
+	cmp #6	 ; compare acc to 6
+	bcc .end ; if acc < 6, go to .end
+
+	sec		; set carry
+	sbc #6		; acc = acc - 6 (tile index)
+	sta .buffer	; .buffer = acc
+	txa		; acc = x
+	clc		; clear carry
+	adc #24		; acc = acc + 24 (offset)
+	tax		; x = acc
+	lda .buffer	; acc = .buffer
+
+	jmp .loop	; next
+	
+.end			; at this point acc < 6
+	sta .buffer	; we'll add the .buffer to x
+	txa		; and that's the offset
+	clc		;
+	adc .buffer	;
+	sta ret8b1	; storing the result
+
+
+	+restore_registers
+
+	rts ; return to sender
+
+.buffer !byte 0
+
 !zone draw_target_puzzle
 ;======================================================================
 ;
@@ -764,8 +1190,6 @@ init_sidrng
 	
 	rts
 
-RANDOM = $D41B
-
 !zone vsync
 ;======================================================================
 ;
@@ -926,7 +1350,7 @@ loadscreen_mainmenu
 ;======================================================================
 ;
 ; Copies memory from one location to another
-; 
+;
 ; arg16b1 source address
 ; arg16b2 target address
 ; arg16b3 length
@@ -978,7 +1402,7 @@ memcopy
 
 	ldy #0
 	lda (.zpp_source),y
-	sta (.zpp_target),y 
+	sta (.zpp_target),y
 	
 	; Increasing our pointers
 	
@@ -1015,6 +1439,7 @@ memcopy
 
 .source_end !byte #0,0
 
+
 !zone data
 ;----------------------------------------------------------------------
 ;
@@ -1040,6 +1465,21 @@ level03 !media "level03.charscreen",charcolor
 
 current_level !byte #0
 
+; cursor sprite
+;
+; this sprite goes on top of the "empty" position in the puzzle
+; and effectively hides the missing piece
+
+cursor_sprite_pos !byte 7 ; 0-143
+
+cursor_sprite !media "cursor_sprite.spriteproject",sprite,0,1
+
+cursor_sprite_colour = VIC + $27
+
+cursor_sprite_x = VIC
+cursor_sprite_y = VIC+$1
+cursor_sprite_xmsb = VIC+$10
+
 ; Arguments used for passing information
 ; to subroutines
 
@@ -1054,3 +1494,13 @@ arg8b4 !byte #0
 arg16b3
 arg8b5 !byte #0
 arg8b6 !byte #0
+
+; and the return values
+
+ret16b1
+ret8b1 !byte #0
+ret8b2 !byte #0
+
+; sid random number location
+
+rand8 = $D41B
