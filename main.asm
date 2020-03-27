@@ -624,6 +624,7 @@ move_cursor_up
 	pha	; backup accumulator
 
 	lda cursor_sprite_pos	; load cursor position
+	sta arg8b1		; storing as argument for the swap
 	clc	; clear carry
 	cmp #6  ; compare position with 6
 	
@@ -635,7 +636,12 @@ move_cursor_up
 	
 	pla	; restore accumulator
 	
+	lda cursor_sprite_pos	; setting up the other argument
+	sta arg8b2		; for the swap
+	
 	jsr update_cursor ; update the cursor sprite
+	
+	jsr swap_tiles
 	
 	rts	; return to sender
 
@@ -654,6 +660,8 @@ move_cursor_down
 	pha	; backup accumulator
 
 	lda cursor_sprite_pos	; load cursor position
+	sta arg8b1		; storing as argument for the swap
+	
 	clc	; clear carry
 	cmp #31 ; compare position with 30
 	
@@ -664,6 +672,11 @@ move_cursor_down
 	+
 	
 	pla	; restore accumulator
+	
+	lda cursor_sprite_pos	; setting up the other argument
+	sta arg8b2		; for the swap
+	
+	jsr swap_tiles
 	
 	jsr update_cursor ; update the cursor sprite
 
@@ -684,6 +697,7 @@ move_cursor_left
 	pha	; backup accumulator
 
 	lda cursor_sprite_pos	; load cursor position
+	sta arg8b1		; storing as argument for the swap
 	
 	; first we calculate position % 6
 -
@@ -704,7 +718,12 @@ move_cursor_left
 	+
 	
 	pla	; restore accumulator
-
+	
+	lda cursor_sprite_pos	; setting up the other argument
+	sta arg8b2		; for the swap
+	
+	jsr swap_tiles
+	
 	jsr update_cursor ; update the cursor sprite
 	
 	rts	; return to sender
@@ -724,6 +743,7 @@ move_cursor_right
 	pha	; backup accumulator
 
 	lda cursor_sprite_pos	; load cursor position
+	sta arg8b1		; storing as argument for the swap
 	
 	; first we calculate position % 6
 -
@@ -745,6 +765,11 @@ move_cursor_right
 	
 	pla	; restore accumulator
 	
+	lda cursor_sprite_pos	; setting up the other argument
+	sta arg8b2		; for the swap
+	
+	jsr swap_tiles
+		
 	jsr update_cursor ; update the cursor sprite
 
 	rts	; return to sender
@@ -932,14 +957,17 @@ swap_tiles
 ; arg8b2 - index of second tile (tile b)
 ;
 
-	lda #<player_solution	; setting up a zero page pointer
-	sta ZPP1		; because we use indexing
-	lda #>player_solution	;
-	sta ZPP1+1		;
-	
 	jsr calc_tile_offset	; calculating the offset for tile a
 	lda ret8b1
 	sta .tile_a_offset
+	
+	ldx .tile_a_offset	; the x offset needs to be multiplied
+	ldy #6			; by 2
+	jsr modulus		;
+	clc			; so that's what we're doing here
+	adc .tile_a_offset	;
+	sta .tile_a_offset	;
+	
 	
 	lda arg8b2		; calculating the offset for tile b
 	sta arg8b1
@@ -947,9 +975,70 @@ swap_tiles
 	lda ret8b1
 	sta .tile_b_offset
 	
+	ldx .tile_b_offset	; the x offset needs to be multiplied
+	ldy #6			; by 2
+	jsr modulus		;
+	clc			; so that's what we're doing here
+	adc .tile_b_offset	;
+	sta .tile_b_offset	;
+	
+	; each "block" is 4 smaller blocks:
+	; 12
+	; 34
+	;
+	; with blocks 3 and 4 being 24 positions later in memory
+	; than 1 and 2
+	
+	ldx .tile_a_offset	; load block 1 offsets
+	ldy .tile_b_offset	;
+	
+	jsr .transfer_blocks	; transferring block 1
+	
+	inx			; moving on to block 2
+	iny			;
+	
+	jsr .transfer_blocks	; transferring block 2
+	
+	txa			; moving down a row to
+	clc			; load block 3 offsets
+	adc #11			;
+	tax			;
+	
+	tya			;
+	clc			;
+	adc #11			;
+	tay			;
+	
+	jsr .transfer_blocks	; transferring block 3
+	
+	inx			; moving on to block 4
+	iny			;
+	
+	jsr .transfer_blocks	; transferring block 4
+	
+	rts
+
+.transfer_blocks
+
+	lda player_solution,x ; transferring character block
+	sta .buffer
+	lda player_solution,y
+	sta player_solution,x
+	lda .buffer
+	sta player_solution,y
+	
+	lda player_solution+144,x ; transferring colour block
+	sta .buffer
+	lda player_solution+144,y
+	sta player_solution+144,x
+	lda .buffer
+	sta player_solution+144,y
+	
+	rts
+	
 .tile_a_offset !byte 0
 .tile_b_offset !byte 0
-.buffer_tiles !byte 0,0,0,0,0,0,0,0 ; to hold the characters and colours
+.buffer !byte 0,0,0,0,0,0,0,0 ; to hold the characters and colours
 
 !zone calc_tile_offset
 calc_tile_offset
@@ -1439,7 +1528,34 @@ memcopy
 
 .source_end !byte #0,0
 
+!zone modulus
+modulus
+;======================================================================
+;
+; modulus
+;
+;======================================================================
+; x int A
+; y int B
+;
+; acc A%B
 
+	sty .buffer	; store y in .buffer
+	txa		; acc = x
+	
+.loop
+	clc		; clear carry
+	cmp .buffer	; compare acc to buffer
+	bcc .end	; if acc < buffer, then jump to .end
+	sec		; set carry
+	sbc .buffer	; acc = acc - .buffer
+	jmp .loop	; next
+	
+.end
+	rts	; return to sender
+	
+.buffer !byte 0
+	
 !zone data
 ;----------------------------------------------------------------------
 ;
@@ -1451,8 +1567,8 @@ screen_mainmenu !media "mainmenu.charscreen",charcolor
 screen_level !media "level.charscreen",charcolor
 
 puzzle_current   !byte 0, 0  ; pointer to the current puzzle
-player_solution  !fill 288,0 	; player's solving attempt
-				; 144 characters, 144 colours
+player_solution  !fill 144,0 	; player's solving attempt
+player_solution_colours !fill 144,0	; 144 characters, 144 colours
 				
 draw_cache !fill 288, 0 ; cache used for drawing to the screen
 			; to keep the code logic simpler
