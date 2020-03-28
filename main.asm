@@ -1030,12 +1030,14 @@ init_level
 	beq+	; true: jump to +
 	
 	clc			; otherwise, clear carry
-	lda puzzle_current	; and add 144 to the puzzle_current pointer
-	adc #144
-	sta puzzle_current
-	lda puzzle_current+1
-	adc #0
-	sta puzzle_current+1
+				; and add 288 to the puzzle_current pointer
+	inc puzzle_current+1	; pointer = pointer + 256
+	lda puzzle_current	;
+	adc #32			;
+	sta puzzle_current	; pointer = pointer + 32
+	lda puzzle_current+1	;
+	adc #0			; 256 + 32 = 288
+	sta puzzle_current+1	;
 	dex			; x = x + 1
 	jmp -			; next
 +
@@ -1767,7 +1769,7 @@ level03 !media "level03.charscreen",charcolor
 
 ; current level
 
-current_level !byte #0
+current_level !byte #1
 
 ; cursor sprite
 ;
