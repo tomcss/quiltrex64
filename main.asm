@@ -542,7 +542,7 @@ playing
 	jsr loadscreen_level
 	lda #0
 	jsr init_level
-	
+	jsr scramble_solution
 	jsr draw_target_puzzle
 -	
 	jsr vsync
@@ -560,10 +560,22 @@ playing
 	cmp .joy2_pstate ; Is the input new?
 	bne+
 	rts		; return if it isn't
+
++
 	
-+	sta .joy2_pstate
+	eor .joy2_pstate	; exlusive or with the previous state
+	sta .joy2_changed	; store changed bits in .joy2_changed
+	
+	lda JOY2		; loading JOY2 into acc
+	
+	sta .joy2_pstate	; storing it as the previous state
 	
 	; check JOY2_UP
+	
+	lda .joy2_changed	; first checking to see if
+	and #JOY_UP		; the state of joy2 up has changed
+	cmp #0			; if not, skip to next check
+	beq+			;
 	
 	lda JOY2
 	
@@ -575,6 +587,11 @@ playing
 	
 	; check JOY2_DOWN
 	
+	lda .joy2_changed	; first checking to see if
+	and #JOY_DOWN		; the state of joy2 down has changed
+	cmp #0			; if not, skip to next check
+	beq+			;
+	
 	lda JOY2
 	
 	and #JOY_DOWN ; is down pressed
@@ -584,6 +601,11 @@ playing
 	+
 	
 	; check JOY2_LEFT
+	
+	lda .joy2_changed	; first checking to see if
+	and #JOY_LEFT		; the state of joy2 left has changed
+	cmp #0			; if not, skip to next check
+	beq+			;
 	
 	lda JOY2
 	
@@ -595,6 +617,12 @@ playing
 	
 	; check JOY2_RIGHT
 	
+	
+	lda .joy2_changed	; first checking to see if
+	and #JOY_RIGHT		; the state of joy2 right has changed
+	cmp #0			; if not, skip to next check
+	beq+			;
+	
 	lda JOY2
 	
 	and #JOY_RIGHT ; is right pressed?
@@ -602,12 +630,126 @@ playing
 	bne+ ; if not, jump to +
 	jsr move_cursor_right
 	+
+	
+	jsr check_level_completed
 
 	rts
 
+.joy2_changed !byte #0	; all bits that have changed are
+			; set to 1
 .joy2_pstate !byte #0 	; The previous state of Joystick #2
 			; This is used to determine whether
 			; the input is new
+		
+!zone scramble_solution
+scramble_solution
+;======================================================================
+;
+; scramble_solution
+;
+;======================================================================
+;
+; shuffles the tiles up a bit
+;
+
+	+backup_registers
+	
+	lda #255
+	sta .counter	; we'll shuffle 255 times
+	
+.loop
+	
+	clc		; clear carry
+	lda rand8	; load random number
+	
+	and #%00000011	; we only need 0-3
+	
+	cmp #0		; acc == 0?
+	bne +		; if not, jump to +
+	jsr move_cursor_up ; otherwise swap up
+	+
+	
+	cmp #1		; acc == 1?
+	bne +		; if not, jump to +
+	jsr move_cursor_down ; otherwise swap down
+	+
+	
+	cmp #2		; acc == 2?
+	bne +		; if not, jump to +
+	jsr move_cursor_left	; otherwise swap left
+	+
+	
+	cmp #3		; acc == 3?
+	bne +		; if not, jump to +
+	jsr move_cursor_right	; otherwise swap right
+	+
+	
+	dec .counter	; .counter = .counter - 1
+	bne .loop	; if .counter != 0, jump back to .loop
+	
+	+restore_registers
+	
+	rts
+
+.counter !byte 0 ; loop counter
+
+!zone check_level_completed
+;======================================================================
+;
+; check_level_completed
+;
+;======================================================================
+;
+; checks to see if the level is completed by comparing the target
+; puzzle memory to the player solution memory
+;
+
+check_level_completed
+
+	+backup_registers
+
+	lda #0			; we start by assuming it's
+	sta level_completed	; not completed
+	
+	sta $400 ; debug
+		
+	clc				; setting up a zpp
+	lda puzzle_current		; for the colours
+	adc #144			;
+	sta .puzzle_current_colours	; since 288 characters
+	lda puzzle_current+1		; is more than x can handle
+	adc #0				;
+	sta .puzzle_current_colours+1	;
+	
+	ldy #0	; initialising our iterator
+	
+.loop
+	lda (puzzle_current),y	; comparing character x
+	cmp player_solution,y	;
+	bne .end		; if they're not equal, jump to .end
+	
+	lda (.puzzle_current_colours),y	; comparing colour x
+	cmp player_solution+144,y	; if they're not equal,
+	bne .end			; jump to .end
+	
+	inc $400
+	iny
+	cpy #144		; x == 144?
+	bne .loop	; false: jump to .loop
+	
+	; if we're still here, it means the level is complete!
+	
+	inc BORDER_COLOUR
+	
+	lda #1
+	sta level_completed
+	
+.end
+	+restore_registers
+	
+	rts
+
+.puzzle_current_colours = $40
 
 !zone move_cursor_up
 move_cursor_up
@@ -663,7 +805,7 @@ move_cursor_down
 	sta arg8b1		; storing as argument for the swap
 	
 	clc	; clear carry
-	cmp #31 ; compare position with 30
+	cmp #30 ; compare position with 30
 	
 	bcs+	; is position >= 30? the skip to +
 	clc	; clear carry
@@ -774,7 +916,6 @@ move_cursor_right
 
 	rts	; return to sender
 
-
 !zone update_cursor
 update_cursor
 ;======================================================================
@@ -881,22 +1022,59 @@ init_level
 	lda #>level01        ; memory
 	sta puzzle_current+1 ;
 	
-	ldx #0		; now copying the level to the player's
+	ldx current_level	; now increasing the offset to the
+				; correct level
+				
+-
+	cpx #0	; x == 0?
+	beq+	; true: jump to +
+	
+	clc			; otherwise, clear carry
+	lda puzzle_current	; and add 144 to the puzzle_current pointer
+	adc #144
+	sta puzzle_current
+	lda puzzle_current+1
+	adc #0
+	sta puzzle_current+1
+	dex			; x = x + 1
+	jmp -			; next
++
+	
+	clc				; setting up a zpp
+	lda puzzle_current		; for the colours
+	adc #144			; because x and y
+	sta .puzzle_current_colours	; can only go up to 255
+	lda puzzle_current+1		;
+	adc #0				;
+	sta .puzzle_current_colours+1	;
+	
+	ldy #0		; now copying the level to the player's
                         ; side
 
--	cpx #144		
+-	cpy #144			
 	beq+
-	lda level01,x		; copying character
-	sta player_solution,x
-	lda level01+144,x	; copying colour
-	sta player_solution+144,x
-	inx
+	lda (puzzle_current),y	; copying character
+	sta player_solution,y
+	lda (.puzzle_current_colours),y	; copying colour
+	sta player_solution+144,y
+	iny
 	jmp-
 +	
 
 	jsr init_cursor_sprite
 	
 	rts
+
+.puzzle_current_colours = $40
+	
+!zone load_next_level
+;======================================================================
+;
+; load_next_level
+;
+;======================================================================
+load_next_level
+
 
 !zone init_cursor_sprite
 ;======================================================================
@@ -1121,19 +1299,28 @@ draw_target_puzzle
 	lda #>(VIC_COLOURRAM+.offset_target)
 	sta ZPP2+1
 	
+	clc				; setting up a zpp
+	lda puzzle_current		; for the colours
+	adc #144			; because x and y
+	sta .puzzle_current_colours	; can only go up to 255
+	lda puzzle_current+1		;
+	adc #0				;
+	sta .puzzle_current_colours+1	;
+	
 	; filling the draw cache
 	
-	ldx #0
+	ldy #0
 -
-	cpx #144		; x == 144?
+	cpy #144		; y == 144?
 	beq+			; true: jump to +
 	
-	lda level01,x		; false, copy next character
-	sta draw_cache,x
-	lda level01+144,x 	; and colour
-	sta draw_cache+144,x
+	lda (puzzle_current),y	; false, copy next character
+	sta draw_cache,y
 	
-	inx			; x++
+	lda (.puzzle_current_colours),y	; and colour
+	sta draw_cache+144,y
+	
+	iny			; x++
 	jmp-			; next
 	
 +
@@ -1144,6 +1331,7 @@ draw_target_puzzle
 	rts
 
 .offset_target = $0145   ; The memory offset of the displayed level
+.puzzle_current_colours = $48	; zpp for the current puzzle colours
 
 !zone draw_player_puzzle
 ;======================================================================
@@ -1566,7 +1754,7 @@ modulus
 screen_mainmenu !media "mainmenu.charscreen",charcolor
 screen_level !media "level.charscreen",charcolor
 
-puzzle_current   !byte 0, 0  ; pointer to the current puzzle
+puzzle_current = $46	; pointer to the current puzzle
 player_solution  !fill 144,0 	; player's solving attempt
 player_solution_colours !fill 144,0	; 144 characters, 144 colours
 				
@@ -1595,6 +1783,8 @@ cursor_sprite_colour = VIC + $27
 cursor_sprite_x = VIC
 cursor_sprite_y = VIC+$1
 cursor_sprite_xmsb = VIC+$10
+
+level_completed !byte 0	; boolean
 
 ; Arguments used for passing information
 ; to subroutines
