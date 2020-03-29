@@ -58,9 +58,9 @@ mainmenu
 	jsr .draw_mainmenu
 	jsr .handle_input
 	jsr vsync
-	;jmp -
+	jmp -
 	; testing, skipping menu
-	jmp playing
+	;jmp playing
 	
 .handle_input
 
@@ -543,13 +543,19 @@ playing
 	lda #0
 	jsr init_level
 	jsr scramble_solution
+	jsr scramble_solution
+	jsr scramble_solution
 	jsr draw_target_puzzle
 -	
 	jsr vsync
 	jsr .handle_input
 	jsr draw_player_puzzle
 	
-	jmp-
+	lda #0
+	cmp level_completed
+	beq-
+	
+	jmp load_next_level
 	
 ;-----------------------------------
 
@@ -632,7 +638,6 @@ playing
 	+
 	
 	jsr check_level_completed
-
 	rts
 
 .joy2_changed !byte #0	; all bits that have changed are
@@ -686,6 +691,10 @@ scramble_solution
 	
 	dec .counter	; .counter = .counter - 1
 	bne .loop	; if .counter != 0, jump back to .loop
+	
+	
+	lda #0			; set level_completed to 0
+	sta level_completed	;
 	
 	+restore_registers
 	
@@ -1077,6 +1086,8 @@ init_level
 ;======================================================================
 load_next_level
 
+	inc current_level
+	jmp playing
 
 !zone init_cursor_sprite
 ;======================================================================
@@ -1103,7 +1114,7 @@ init_cursor_sprite
 	lda #100	; and setting the y position
 	sta cursor_sprite_y
 	
-	lda #7		; setting the sprite colour
+	lda #0		; setting the sprite colour
 	sta cursor_sprite_colour
 	
 	; now to copy the sprite over
@@ -1763,13 +1774,11 @@ player_solution_colours !fill 144,0	; 144 characters, 144 colours
 draw_cache !fill 288, 0 ; cache used for drawing to the screen
 			; to keep the code logic simpler
 
-level01 !media "level01.charscreen",charcolor
-level02 !media "level02.charscreen",charcolor
-level03 !media "level03.charscreen",charcolor
+!source "levels_original.asm"
 
 ; current level
 
-current_level !byte #1
+current_level !byte #0
 
 ; cursor sprite
 ;
