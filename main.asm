@@ -58,9 +58,9 @@ mainmenu
 	jsr .draw_mainmenu
 	jsr .handle_input
 	jsr vsync
-	jmp -
+	;jmp -
 	; testing, skipping menu
-	;jmp playing
+	jmp playing
 	
 .handle_input
 
@@ -543,8 +543,6 @@ playing
 	lda #0
 	jsr init_level
 	jsr scramble_solution
-	jsr scramble_solution
-	jsr scramble_solution
 	jsr draw_target_puzzle
 -	
 	jsr vsync
@@ -659,39 +657,107 @@ scramble_solution
 
 	+backup_registers
 	
-	lda #255
-	sta .counter	; we'll shuffle 255 times
+	lda #20
+	sta .counter	; we'll shuffle 20 times
 	
 .loop
+
+	; shuffling rows 2-5 up or down, randomly
 	
-	clc		; clear carry
+	lda #6
+	sta .index
+	
+.rows_loop
+	
+	lda .index
+	sta arg8b1
+	
 	lda rand8	; load random number
+	and #%00000001	; we only need 0-1
 	
-	and #%00000011	; we only need 0-3
+	cmp #0
+	bne+
+	lda .index
+	sec
+	sbc #6
+	jmp++
++
+	lda .index
+	clc
+	adc #6
+++
+	sta arg8b2
+	jsr swap_tiles
 	
-	cmp #0		; acc == 0?
-	bne +		; if not, jump to +
-	jsr move_cursor_up ; otherwise swap up
-	+
+	inc .index
+	lda #30
+	cmp .index
+	bne .rows_loop
 	
-	cmp #1		; acc == 1?
-	bne +		; if not, jump to +
-	jsr move_cursor_down ; otherwise swap down
-	+
+	; shuffling columns 2-5 left or right, randomly
 	
-	cmp #2		; acc == 2?
-	bne +		; if not, jump to +
-	jsr move_cursor_left	; otherwise swap left
-	+
+	lda #1
+	sta .index	
 	
-	cmp #3		; acc == 3?
-	bne +		; if not, jump to +
-	jsr move_cursor_right	; otherwise swap right
-	+
+.columns_loop
 	
+	lda .index
+	sta arg8b1
+	
+	lda rand8	; load random number
+	and #%00000001	; we only need 0-1
+	
+	cmp #0
+	bne+
+	lda .index
+	sec
+	sbc #1
+	jmp++
++
+	lda .index
+	clc
+	adc #1
+++
+	sta arg8b2
+;	jsr swap_tiles
+	
+	inc .index
+	
+	lda #5
+	cmp .index
+	beq add2
+	
+	lda #11
+	cmp .index
+	beq add2
+	
+	lda #17
+	cmp .index
+	beq add2
+	
+	lda #23
+	cmp .index
+	beq add2
+	
+	lda #29
+	cmp .index
+	beq add2
+	
+	lda #35
+	cmp .index
+	bne .columns_loop
+	jmp+
+	
+add2
+	inc .index
+	inc .index
+	
+	jmp .columns_loop
++
 	dec .counter	; .counter = .counter - 1
-	bne .loop	; if .counter != 0, jump back to .loop
-	
+	beq+
+	jmp .loop	; if .counter != 0, jump back to .loop
++	
 	
 	lda #0			; set level_completed to 0
 	sta level_completed	;
@@ -701,6 +767,7 @@ scramble_solution
 	rts
 
 .counter !byte 0 ; loop counter
+.index !byte 0	; index counter
 
 !zone check_level_completed
 ;======================================================================
@@ -1129,6 +1196,13 @@ init_cursor_sprite
 	cpx #64			; x==64?
 	bne .loop		; true: go to .loop
 				; false: we're done
+				
+-	lda rand8		; setting the cursor
+	and #%00111111
+	cmp #36			; position to a random
+	bcs-			; position between 0 and 143
+				;
+	sta cursor_sprite_pos	;
 				
 	jsr update_cursor ; update the cursor sprite
 
