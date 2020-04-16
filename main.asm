@@ -1879,6 +1879,8 @@ loadscreen_level
 
 loadscreen_info
 
+	jsr vsync
+	
 	;
 	; Setting the border and background colour to black
 	;
@@ -1942,6 +1944,8 @@ loadscreen_info
 
 loadscreen_mainmenu
 
+	jsr vsync
+
 	;
 	; Setting the border and background colour to black
 	;
@@ -1990,7 +1994,8 @@ loadscreen_mainmenu
 	lda #>1000
 	sta arg16b3+1
 	
-	jsr memcopy	
+	jsr memcopy
+	
 	rts
 
 !zone memcopy
@@ -2007,19 +2012,6 @@ loadscreen_mainmenu
 ; arg16b3 length
 ;----------------------------------------------------------------------
 memcopy
-
-	; Adding the length to the source
-	; address so we know when to stop
-	
-	clc
-	
-	lda arg16b1
-	adc arg16b3
-	sta .source_end
-	
-	lda arg16b1+1
-	adc arg16b3+1
-	sta .source_end+1
 	
 	; Setting up the zero page pointers we'll be using
 	
@@ -2035,49 +2027,68 @@ memcopy
 	lda arg16b2+1
 	sta .zpp_target+1
 	
-.mainloop
-
-	clc
-
-	; Check to see if we're done yet
+	; first, we copy over length%256 bytes, so we can then
+	; copy the rest in chunks of 256
 	
-	lda .zpp_source
-	cmp .source_end
-	bne +
+	ldy arg16b3
 	
-	lda .zpp_source+1
-	cmp .source_end+1
-	beq .end
+.modloop
+	cpy #0
+	beq+
+	dey
 	
-+	; Copying over a single byte
-
-	ldy #0
 	lda (.zpp_source),y
 	sta (.zpp_target),y
 	
-	; Increasing our pointers
+	jmp .modloop
++
+	; increase the pointers
 	
-	clc
 	
-	lda .zpp_source
-	adc #1
-	sta .zpp_source
+	lda arg16b3		; first the source pointer
+
+	clc			; clear the carry
+	adc .zpp_source		; add LO(length) to .zpp_source
+	sta .zpp_source		;
 	
-	lda .zpp_source+1
-	adc #0
-	sta .zpp_source+1
+	lda .zpp_source+1	; if overflow, add
+	adc #0			; 1 to .zpp_source+1
+	sta .zpp_source+1	; storing the result back into .zpp_source+1
 	
-	clc
+	lda arg16b3		; now the target pointer
 	
-	lda .zpp_target
-	adc #1
-	sta .zpp_target
+	clc			; clear the carry
+	adc .zpp_target		; add LO(length) to .zpp_target
+	sta .zpp_target		;
 	
-	lda .zpp_target+1
-	adc #0
-	sta .zpp_target+1
+	lda .zpp_target+1	; if overflow, add
+	adc #0			; 1 to .zpp_target+1
+	sta .zpp_target+1	; storing the result back into .zpp_target+1
+
+	; now to copy the rest of the data in chunks of 256
+	; outer loop x, inner loop y
 	
-	; And back to the start
+	ldx arg16b3+1	; loading HI(length) into x
+	
+.mainloop
+
+	cpx #0
+	beq .end
+	
+	ldy #0		; y = 0
+	.innerloop
+		
+		lda (.zpp_source),y
+		sta (.zpp_target),y
+		
+		iny		; y++
+		cpy #0
+		bne .innerloop
+		
+	dex			; x--
+	inc .zpp_target+1	; increase pointers by 256 for the
+	inc .zpp_source+1	; next chunk
+
 	
 	jmp .mainloop
 	
@@ -2088,7 +2099,6 @@ memcopy
 .zpp_source = $40
 .zpp_target = $42
 
-.source_end !byte #0,0
 
 !zone modulus
 modulus
