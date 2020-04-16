@@ -1,3 +1,4 @@
+!to "quiltrex.d64",d64
 ;
 ; Autoloader
 ;
@@ -14,7 +15,7 @@
 SCREEN = $0400
 KEYBOARD = $00CB
 KEYBOARD_META = $028D
-screen_colours = $D800
+SCREEN_COLOURS = $D800
 RASTER_LINE = $D012
 
 BORDER_COLOUR = $D020
@@ -38,6 +39,12 @@ VIC_COLOURRAM = $D800
 
 CHRIN = $FFCF
 
+; kernal routines
+
+SCNKEY        = $FF9F
+SCNKEY_RESULT = $00CB
+SCNKEY_FLAGS  = $028D
+
 !zone init
 ;==========================================================================
 ;
@@ -46,7 +53,20 @@ CHRIN = $FFCF
 ;==========================================================================
 
 init
-	jsr init_sidrng ; setting up the random number generator
+	lda #30		; toggling the basic rom
+	sta $01
+	
+	jsr $A000
+	
+	lda #16		; setting multi colour character mode
+	ora $D016
+	sta $D016
+	
+	lda $D018
+	and #%11110001
+	clc
+	adc #%00001110
+	sta $D018
 	
 	jmp mainmenu
 
@@ -57,20 +77,21 @@ mainmenu
 	-
 	jsr .draw_mainmenu
 	jsr .handle_input
+	jsr $A003
 	jsr vsync
-	;jmp -
+	jmp -
 	; testing, skipping menu
-	jmp playing
+	;jmp playing
 	
 .handle_input
 
 	lda JOY2       ; Joystick 2 state
 	
-	cmp .joy2_pstate ; Is the input new?
+	cmp joy2_pstate ; Is the input new?
 	bne+
 	rts		; return if it isn't
 	
-+	sta .joy2_pstate
++	sta joy2_pstate
 	
 	;{ Check JOY2_UP
 	
@@ -106,16 +127,30 @@ mainmenu
 +	sta .status     ; and store it back into .status
 	;}
 ++
-	;{ Check JOY2_BUTTON
+	; Check JOY2_BUTTON
 		
 	lda JOY2
 	
 	and #JOY_BUTTON
 	cmp #0
 	bne++
-	jmp playing
+		lda .status
+		cmp #0
+		bne+
+		jmp playing
+		+
+		
+		cmp #1
+		bne+
+		jmp info
+		+
+		
+		cmp #2
+		bne+
+		!byte 0,0
+		+
 	++
-	;}
+	;
 
 	rts
 
@@ -508,10 +543,6 @@ mainmenu
 .location_newgame = $23E
 .location_info = $28E
 .location_quit = $2dE
-
-.joy2_pstate !byte #0 	; The previous state of Joystick #2
-			; This is used to determine whether
-			; the input is new
 			
 .status !byte #0
 	; menu status, ie which item
@@ -532,6 +563,95 @@ mainmenu
 .text_quit_inactive !scr    "    quit    ",0
 .text_quit_active !scr      "Q   quit   Q",0
 
+!zone info
+;======================================================================
+;
+; info
+;
+;======================================================================
+;
+; loads the info screen with credits and displays it until
+; a joystick input has been made, after which we'll return to
+; the main menu
+;
+
+info
+	jsr loadscreen_info
+	
+	lda #0
+	sta .return
+	
+-
+	jsr .handle_input
+	
+	lda #0
+	cmp .return
+	beq-
+	
+	jmp mainmenu
+
+.handle_input
+
+	lda JOY2       ; Joystick 2 state
+	
+	cmp joy2_pstate ; Is the input new?
+	bne+
+		rts		; return if it isn't
+	+
+	
+	sta joy2_pstate	; updating the previous state
+	
+	and #JOY_BUTTON	; is the joystick button pressed?
+	cmp #0
+	
+	bne+
+		inc .return	; return to the main menu if it is
+	+
+	
+	rts
+
+.return !byte 0 ; for determining whether or not to return to the main menu
+!zone draw_level_number
+;======================================================================
+;
+; draw_level_number
+;
+;======================================================================
+;
+; converting the level number from binary to a decimal representation
+;
+draw_level_number
+
+	lda #48
+	sta SCREEN+.offset
+	sta SCREEN+.offset+1
+	
+	ldx current_level
+	inx
+	ldy #10
+	jsr modulus
+	clc
+	adc SCREEN+.offset+1
+	sta SCREEN+.offset+1
+	
+	lda current_level
+	clc
+	adc #1
+-
+	clc
+	cmp #10
+	bcc+
+		inc SCREEN+.offset
+		sec
+		sbc #10
+		jmp-
+	+
+	
+	rts
+
+.buffer
+.offset = $7c ; offset from the top left of the screen
+
 !zone playing
 ;======================================================================
 ;
@@ -543,9 +663,11 @@ playing
 	lda #0
 	jsr init_level
 	jsr scramble_solution
+	jsr draw_missing_block
 	jsr draw_target_puzzle
 -	
 	jsr vsync
+	jsr .handle_keyboard
 	jsr .handle_input
 	jsr draw_player_puzzle
 	
@@ -556,23 +678,42 @@ playing
 	jmp load_next_level
 	
 ;-----------------------------------
+.handle_keyboard ; mainly for debugging
+
+	jsr SCNKEY	; getting keyboard status
+
+	lda SCNKEY_RESULT
+	
+	cmp #$2c ; > on pc keyboard
+	bne+
+	inc level_completed
+	+
+	
+	cmp #$2f ; < on pc keyboard
+	bne+
+	dec current_level
+	dec current_level
+	inc level_completed
+	+
+	rts
+;-----------------------------------
 
 .handle_input
 
 	lda JOY2       ; Joystick 2 state
 	
-	cmp .joy2_pstate ; Is the input new?
+	cmp joy2_pstate ; Is the input new?
 	bne+
 	rts		; return if it isn't
 
 +
 	
-	eor .joy2_pstate	; exlusive or with the previous state
+	eor joy2_pstate	; exlusive or with the previous state
 	sta .joy2_changed	; store changed bits in .joy2_changed
 	
 	lda JOY2		; loading JOY2 into acc
 	
-	sta .joy2_pstate	; storing it as the previous state
+	sta joy2_pstate	; storing it as the previous state
 	
 	; check JOY2_UP
 	
@@ -640,9 +781,6 @@ playing
 
 .joy2_changed !byte #0	; all bits that have changed are
 			; set to 1
-.joy2_pstate !byte #0 	; The previous state of Joystick #2
-			; This is used to determine whether
-			; the input is new
 		
 !zone scramble_solution
 scramble_solution
@@ -656,8 +794,10 @@ scramble_solution
 ;
 
 	+backup_registers
+
+	jsr init_sidrng ; setting up the random number generator
 	
-	lda #20
+	lda #2
 	sta .counter	; we'll shuffle 20 times
 	
 .loop
@@ -719,7 +859,7 @@ scramble_solution
 	adc #1
 ++
 	sta arg8b2
-;	jsr swap_tiles
+	jsr swap_tiles
 	
 	inc .index
 	
@@ -786,8 +926,6 @@ check_level_completed
 
 	lda #0			; we start by assuming it's
 	sta level_completed	; not completed
-	
-	sta $400 ; debug
 		
 	clc				; setting up a zpp
 	lda puzzle_current		; for the colours
@@ -808,7 +946,6 @@ check_level_completed
 	cmp player_solution+144,y	; if they're not equal,
 	bne .end			; jump to .end
 	
-	inc $400
 	iny
 	cpy #144		; x == 144?
 	bne .loop	; false: jump to .loop
@@ -1079,8 +1216,8 @@ update_cursor
 
 	rts
 
-.cursor_x_offset = $d0 ; offset from the left of the screen
-.cursor_y_offset = $72 ; offset from the top of the screen
+.cursor_x_offset = $d8 ; offset from the left of the screen
+.cursor_y_offset = $82 ; offset from the top of the screen
 
 !zone init_level
 ;======================================================================
@@ -1093,6 +1230,7 @@ update_cursor
 ;
 
 init_level
+
 	lda #<level01        ; Setting the current_puzzle
 	sta puzzle_current   ; pointer to the right puzzle
 	lda #>level01        ; memory
@@ -1140,6 +1278,8 @@ init_level
 +	
 
 	jsr init_cursor_sprite
+	
+	jsr draw_level_number
 	
 	rts
 
@@ -1417,9 +1557,86 @@ draw_target_puzzle
 	
 	rts
 
-.offset_target = $0145   ; The memory offset of the displayed level
+.offset_target = $0194   ; The memory offset of the displayed level
 .puzzle_current_colours = $48	; zpp for the current puzzle colours
 
+!zone draw_missing_block
+;======================================================================
+;
+; draw_missing_block
+;
+;======================================================================
+;
+; draws the missing block behind the player's cursor between
+; the two puzzles
+;
+
+draw_missing_block
+
+	+backup_registers
+	
+	lda cursor_sprite_pos
+	sta arg8b1
+	
+	jsr calc_tile_offset
+	
+	lda ret8b1
+	sta .tile_offset
+	
+	ldx .tile_offset	; the x offset needs to be multiplied
+	ldy #6			; by 2
+	jsr modulus		;
+	clc			; so that's what we're doing here
+	adc .tile_offset	;
+	sta .tile_offset	;
+	
+	tax
+	
+	;
+	; one block is four tiles: 1 2
+	;                          3 4
+	
+	; first copy tile 1
+	lda player_solution,x
+	sta SCREEN+$31D
+	lda player_solution_colours,x
+	sta SCREEN_COLOURS+$31D
+	
+	; then tile 2
+	inx
+	
+	lda player_solution,x
+	sta SCREEN+$31E
+	lda player_solution_colours,x
+	sta SCREEN_COLOURS+$31E
+
+	; tile 3
+	txa
+	clc
+	adc #11
+	tax
+	
+	lda player_solution,x
+	sta SCREEN+$345
+	lda player_solution_colours,x
+	sta SCREEN_COLOURS+$345
+	
+	; and finally, tile 4
+	inx
+	
+	lda player_solution,x
+	sta SCREEN+$346
+	lda player_solution_colours,x
+	sta SCREEN_COLOURS+$346
+	
+	+restore_registers
+	
+	rts
+
+; blocks offset $31D, $31E
+;               $35D, $35C
+
+.tile_offset !byte 0
 !zone draw_player_puzzle
 ;======================================================================
 ;
@@ -1471,7 +1688,7 @@ draw_player_puzzle
 	
 	rts
 
-.offset_player = $0157   ; The memory offset of the displayed level
+.offset_player = $01a8   ; The memory offset of the displayed level
 
 !zone draw_puzzle
 ;======================================================================
@@ -1592,12 +1809,20 @@ vsync
 loadscreen_level
 
 	;
-	; Setting the border and background colour to black
+	; Setting the border and background colours
 	;
 	
-	lda #0
+	lda #0			; black
 	sta BORDER_COLOUR
+	
+	lda #15			; grey
 	sta BACKGROUND_COLOUR
+	
+	lda #0			; black
+	sta $D022		; multicolour #1
+	
+	lda #1			; white
+	sta $D023		; multicolour #2
 
 	;
 	; Copying the petscii into the SCREEN memory
@@ -1641,6 +1866,68 @@ loadscreen_level
 	
 	jsr memcopy	
 	
+	rts
+
+!zone loadscreen_info
+;======================================================================
+;
+; loadscreen_info
+;
+;======================================================================
+;
+; Loads the info screen
+
+loadscreen_info
+
+	;
+	; Setting the border and background colour to black
+	;
+	
+	lda #0
+	sta BORDER_COLOUR
+	sta BACKGROUND_COLOUR
+
+	;
+	; Copying the petscii into the SCREEN memory
+	;
+	
+	lda #<screen_info ; Source location
+	sta arg16b1
+	lda #>screen_info
+	sta arg16b1+1
+	
+	lda #<SCREEN ; Target location
+	sta arg16b2
+	lda #>SCREEN
+	sta arg16b2+1
+	
+	lda #<1000 ; Length
+	sta arg16b3
+	lda #>1000
+	sta arg16b3+1
+	
+	jsr memcopy
+	
+	;
+	; Now copying the colour info
+	;
+	
+	lda #<(screen_info+1000) ; Source location
+	sta arg16b1
+	lda #>(screen_info+1000)
+	sta arg16b1+1
+	
+	lda #<VIC_COLOURRAM ; Target location
+	sta arg16b2
+	lda #>VIC_COLOURRAM
+	sta arg16b2+1
+	
+	lda #<1000 ; Length
+	sta arg16b3
+	lda #>1000
+	sta arg16b3+1
+	
+	jsr memcopy	
 	rts
 
 
@@ -1839,7 +2126,8 @@ modulus
 ;   screens
 
 screen_mainmenu !media "mainmenu.charscreen",charcolor
-screen_level !media "level.charscreen",charcolor
+screen_level	!media "level_mc.charscreen",charcolor
+screen_info	!media "info.charscreen",charcolor
 
 puzzle_current = $46	; pointer to the current puzzle
 player_solution  !fill 144,0 	; player's solving attempt
@@ -1847,8 +2135,6 @@ player_solution_colours !fill 144,0	; 144 characters, 144 colours
 				
 draw_cache !fill 288, 0 ; cache used for drawing to the screen
 			; to keep the code logic simpler
-
-!source "levels_original.asm"
 
 ; current level
 
@@ -1870,6 +2156,10 @@ cursor_sprite_y = VIC+$1
 cursor_sprite_xmsb = VIC+$10
 
 level_completed !byte 0	; boolean
+
+joy2_pstate !byte #0 	; The previous state of Joystick #2
+			; This is used to determine whether
+			; the input is new
 
 ; Arguments used for passing information
 ; to subroutines
@@ -1895,3 +2185,15 @@ ret8b2 !byte #0
 ; sid random number location
 
 rand8 = $D41B
+
+; character set
+
+!source "charset.asm"
+
+; level data
+
+!source "levels_original.asm"
+
+; music files
+*=$a000
+!binary "song01.bin",,$7c+2
