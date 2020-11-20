@@ -53,7 +53,7 @@ SCNKEY_FLAGS  = $028D
 ;==========================================================================
 
 init
-	lda #30		; toggling the basic rom
+	lda #30		; toggling the BASIC rom
 	sta $01
 	
 	jsr $A000
@@ -551,8 +551,8 @@ mainmenu
 	; 1 = info
 	; 2 = quit
 	
-.colour_active   !byte 5,1,1,1,1,1,1,1,1,1,1,5
-.colour_inactive !fill 12,15
+.colour_active   !byte 1,1,1,1,1,1,1,1,1,1,1,1
+.colour_inactive !fill 12,0
 	
 .text_newgame_inactive !scr "  new game  ",0
 .text_newgame_active !scr   "Q new game Q",0
@@ -1950,9 +1950,17 @@ loadscreen_mainmenu
 	; Setting the border and background colour to black
 	;
 	
-	lda #0
+	lda #0			; black
 	sta BORDER_COLOUR
+	
+	lda #15			; grey
 	sta BACKGROUND_COLOUR
+	
+	lda #0			; black
+	sta $D022		; multicolour #1
+	
+	lda #1			; white
+	sta $D023		; multicolour #2	
 
 	;
 	; Copying the petscii into the SCREEN memory
